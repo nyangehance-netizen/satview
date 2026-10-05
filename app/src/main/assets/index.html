@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>SatView</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #0e2a47; --panel: #ffffff; --ink: #1b2430; --muted: #66727f;
+    --accent: #1f7a4d; --accent-ink: #ffffff; --line: #dfe4ea; --warn: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+  #map { position: absolute; inset: 0; }
+
+  .topbar {
+    position: absolute; top: 10px; left: 10px; right: 10px; z-index: 1000;
+    display: flex; gap: 8px; align-items: center;
+  }
+  .topbar select {
+    flex: 1; font-size: 16px; padding: 10px 12px; border-radius: 12px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  }
+  .iconbtn {
+    width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--panel); font-size: 20px; box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  }
+
+  .panel {
+    position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 1000;
+    background: var(--panel); border-radius: 16px; padding: 12px 14px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.25);
+  }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .row label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 2px; }
+  .row > div { flex: 1; min-width: 0; }
+  input[type=date] { width: 100%; font-size: 15px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; }
+  input[type=range] { width: 100%; }
+  .go {
+    width: 100%; padding: 12px; font-size: 16px; font-weight: 600; border: 0;
+    border-radius: 12px; background: var(--accent); color: var(--accent-ink);
+  }
+  .go:disabled { opacity: .6; }
+  #status { font-size: 13px; color: var(--muted); margin-top: 6px; min-height: 18px; }
+  #status.err { color: var(--warn); }
+  .legend { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .bar { flex: 1; height: 10px; border-radius: 5px; }
+  .hide { display: none !important; }
+
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .card { background: var(--panel); border-radius: 16px; padding: 18px; width: 100%; max-width: 420px; }
+  .card h2 { margin: 0 0 8px; font-size: 18px; }
+  .card p { font-size: 13px; color: var(--muted); margin: 0 0 12px; line-height: 1.4; }
+  .card input { width: 100%; font-size: 15px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px; }
+  .card .btns { display: flex; gap: 8px; }
+  .card .btns button { flex: 1; padding: 10px; border-radius: 10px; font-size: 15px; border: 1px solid var(--line); background: #fff; }
+  .card .btns .primary { background: var(--accent); color: #fff; border: 0; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="topbar">
+  <select id="mode" aria-label="What to show">
+    <option value="demo">🌍 Demo: cloud-free Sentinel-2 map (no login)</option>
+    <option value="truecolor">🛰 True colour (Sentinel-2)</option>
+    <option value="ndvi">🌱 Crop &amp; vegetation health (NDVI)</option>
+    <option value="water">💧 Water bodies (Sentinel-2)</option>
+    <option value="flood">🌊 Floods – radar, sees through clouds (Sentinel-1)</option>
+    <option value="no2">🏭 Air quality – NO₂ pollution (Sentinel-5P)</option>
+  </select>
+  <button class="iconbtn" id="locate" title="My location">📍</button>
+  <button class="iconbtn" id="settings" title="Settings">⚙</button>
+</div>
+
+<div class="panel">
+  <div class="legend" id="legend"></div>
+  <div class="row" id="dateRow">
+    <div><label for="from">From</label><input type="date" id="from"></div>
+    <div><label for="to">To</label><input type="date" id="to"></div>
+  </div>
+  <div class="row" id="cloudRow">
+    <div><label for="cloud">Max cloud cover: <span id="cloudVal">30</span>%</label>
+      <input type="range" id="cloud" min="0" max="100" value="30"></div>
+  </div>
+  <div class="row">
+    <div><label for="opacity">Image opacity</label>
+      <input type="range" id="opacity" min="0" max="100" value="100"></div>
+  </div>
+  <button class="go" id="go">Get satellite image of this view</button>
+  <div id="status">Move the map to the area you want, then tap the button.</div>
+</div>
+
+<div class="modal hide" id="modal">
+  <div class="card">
+    <h2>Copernicus login keys</h2>
+    <p>Create a free account at dataspace.copernicus.eu, then open the Sentinel Hub Dashboard → User settings → OAuth clients → Create. Paste the client ID and secret here. They are stored only on this phone.</p>
+    <input id="cid" placeholder="Client ID" autocomplete="off" autocapitalize="off">
+    <input id="csecret" placeholder="Client secret" type="password" autocomplete="off" autocapitalize="off">
+    <div class="btns">
+      <button id="cancel">Cancel</button>
+      <button class="primary" id="save">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------------- Running inside the Android app, or in a web browser? ----------------
+// In a normal browser there is no Kotlin bridge, so only Demo mode can work.
+const IN_APP = typeof window.Android !== 'undefined';
+if (!IN_APP) {
+  window.Android = {
+    hasCredentials: () => false, getClientId: () => '',
+    saveCredentials: () => {}, process: () => {}
+  };
+}
+
+// ---------------- Map ----------------
+const map = L.map('map', { zoomControl: false }).setView([-6.77, 38.93], 11); // Kibaha / Pwani area
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18, attribution: '© OpenStreetMap | Satellite data: Copernicus'
+}).addTo(map);
+let overlay = null;
+
+// Demo layer: a ready-made, cloud-free Sentinel-2 mosaic by EOX. No login needed.
+// Free for non-commercial use (CC BY-NC-SA 4.0).
+const demoLayer = L.tileLayer(
+  'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2024_3857/default/g/{z}/{y}/{x}.jpg', {
+    maxZoom: 17, maxNativeZoom: 15,
+    attribution: 'Sentinel-2 cloudless 2024 by <a href="https://s2maps.eu">EOX IT Services GmbH</a> (contains modified Copernicus Sentinel data 2024)'
+  });
+
+// ---------------- Satellite "recipes" (evalscripts) ----------------
+// Each mode says which satellite to use and how to turn its bands into colours.
+const MODES = {
+  demo: {
+    demo: true,
+    legend: '<span>Cloud-free Sentinel-2 mosaic of 2024. Zoom and pan anywhere on Earth.</span>'
+  },
+  truecolor: {
+    type: 'sentinel-2-l2a', days: 60, clouds: true,
+    legend: '<span>Natural colour, like a photo from space</span>',
+    script: `//VERSION=3
+function setup(){return{input:["B02","B03","B04","dataMask"],output:{bands:4}}}
+function evaluatePixel(s){return[2.5*s.B04,2.5*s.B03,2.5*s.B02,s.dataMask]}`
+  },
+  ndvi: {
+    type: 'sentinel-2-l2a', days: 60, clouds: true,
+    legend: 'Bare/dry <div class="bar" style="background:linear-gradient(90deg,#a50026,#fdae61,#d9ef8b,#66bd63,#006837)"></div> Healthy green',
+    script: `//VERSION=3
+function setup(){return{input:["B04","B08","dataMask"],output:{bands:4}}}
+const viz=new ColorRampVisualizer([[-0.2,0xa50026],[0.0,0xd73027],[0.2,0xfdae61],[0.4,0xd9ef8b],[0.6,0x66bd63],[0.8,0x006837]]);
+function evaluatePixel(s){
+  let ndvi=(s.B08-s.B04)/(s.B08+s.B04+1e-6);
+  let c=viz.process(ndvi);
+  return[c[0],c[1],c[2],s.dataMask];
+}`
+  },
+  water: {
+    type: 'sentinel-2-l2a', days: 60, clouds: true,
+    legend: '<div class="bar" style="background:#1e6cff;flex:0 0 24px"></div> Water &nbsp; (land shown faded)',
+    script: `//VERSION=3
+function setup(){return{input:["B02","B03","B04","B08","dataMask"],output:{bands:4}}}
+function evaluatePixel(s){
+  let ndwi=(s.B03-s.B08)/(s.B03+s.B08+1e-6);
+  if(ndwi>0.1){return[0.12,0.42,1.0,s.dataMask];}
+  return[1.2*s.B04+0.25,1.2*s.B03+0.25,1.2*s.B02+0.25,s.dataMask];
+}`
+  },
+  flood: {
+    type: 'sentinel-1-grd', days: 14, clouds: false,
+    extraFilter: { acquisitionMode: 'IW' },
+    legend: '<div class="bar" style="background:#1e6cff;flex:0 0 24px"></div> Water / flooded &nbsp; (grey = land)',
+    script: `//VERSION=3
+function setup(){return{input:["VV","dataMask"],output:{bands:4}}}
+function evaluatePixel(s){
+  if(s.VV<0.02){return[0.12,0.42,1.0,s.dataMask];}
+  let g=Math.min(1,Math.sqrt(s.VV)*2.5);
+  return[g,g,g,s.dataMask];
+}`
+  },
+  no2: {
+    type: 'sentinel-5p-l2', days: 7, clouds: false, minZoom: 3,
+    legend: 'Clean <div class="bar" style="background:linear-gradient(90deg,#000080,#0000ff,#00ffff,#ffff00,#ff0000)"></div> Polluted',
+    script: `//VERSION=3
+function setup(){return{input:["NO2","dataMask"],output:{bands:4}}}
+const viz=new ColorRampVisualizer([[0,0x000080],[0.000025,0x0000ff],[0.00005,0x00ffff],[0.000075,0xffff00],[0.0001,0xff0000]]);
+function evaluatePixel(s){let c=viz.process(s.NO2);return[c[0],c[1],c[2],s.dataMask*0.8]}`
+  }
+};
+
+// ---------------- UI helpers ----------------
+const $ = id => document.getElementById(id);
+const statusEl = $('status');
+function setStatus(msg, isErr) { statusEl.textContent = msg; statusEl.className = isErr ? 'err' : ''; }
+function isoDay(d) { return d.toISOString().slice(0, 10); }
+
+function applyMode() {
+  const m = MODES[$('mode').value];
+  $('legend').innerHTML = m.legend;
+  $('dateRow').classList.toggle('hide', !!m.demo);
+  if (m.demo) {
+    $('cloudRow').classList.add('hide');
+    if (overlay) { map.removeLayer(overlay); overlay = null; }
+    demoLayer.setOpacity($('opacity').value / 100).addTo(map);
+    $('go').textContent = 'Zoom to Kibaha example';
+    setStatus('Demo mode: real Sentinel-2 imagery, no login needed.');
+    return;
+  }
+  map.removeLayer(demoLayer);
+  $('go').textContent = 'Get satellite image of this view';
+  setStatus(IN_APP
+    ? 'Move the map to the area you want, then tap the button.'
+    : 'Live layers need the SatView Android app. In the browser, try Demo mode.');
+  const today = new Date();
+  const from = new Date(today.getTime() - m.days * 86400000);
+  $('to').value = isoDay(today);
+  $('from').value = isoDay(from);
+  $('cloudRow').classList.toggle('hide', !m.clouds);
+}
+$('mode').addEventListener('change', applyMode);
+$('cloud').addEventListener('input', e => $('cloudVal').textContent = e.target.value);
+$('opacity').addEventListener('input', e => {
+  const o = e.target.value / 100;
+  if (overlay) overlay.setOpacity(o);
+  demoLayer.setOpacity(o);
+});
+applyMode();
+
+// ---------------- Settings ----------------
+function openSettings() {
+  if (!IN_APP) { setStatus('Settings are only available in the Android app.', true); return; }
+  $('cid').value = Android.getClientId(); $('csecret').value = ''; $('modal').classList.remove('hide'); }
+$('settings').onclick = openSettings;
+$('cancel').onclick = () => $('modal').classList.add('hide');
+$('save').onclick = () => {
+  const id = $('cid').value.trim(), sec = $('csecret').value.trim();
+  if (!id || !sec) { alert('Please enter both the client ID and the secret.'); return; }
+  Android.saveCredentials(id, sec);
+  $('modal').classList.add('hide');
+  setStatus('Keys saved. Tap the button to get an image.');
+};
+
+// ---------------- My location ----------------
+$('locate').onclick = () => {
+  if (!navigator.geolocation) { setStatus('Location not available on this device.', true); return; }
+  setStatus('Finding your location…');
+  navigator.geolocation.getCurrentPosition(
+    p => { map.setView([p.coords.latitude, p.coords.longitude], 14); setStatus('Here you are. Tap the button to get an image.'); },
+    () => setStatus('Could not get your location. Check that GPS is on.', true),
+    { enableHighAccuracy: true, timeout: 15000 }
+  );
+};
+
+// ---------------- Request satellite image ----------------
+let seq = 0;
+const pending = {};
+window.onSatResult = (id, ok, data) => { const cb = pending[id]; delete pending[id]; if (cb) cb(ok, data); };
+
+$('go').onclick = () => {
+  const m = MODES[$('mode').value];
+  if (m.demo) { map.setView([-6.77, 38.93], 12); return; }
+  if (!IN_APP) { setStatus('Live layers need the SatView Android app. In the browser, try Demo mode.', true); return; }
+  if (!Android.hasCredentials()) { openSettings(); return; }
+  if (map.getZoom() < (m.minZoom || 7)) { setStatus('Please zoom in more for this layer.', true); return; }
+  const from = $('from').value, to = $('to').value;
+  if (!from || !to || from > to) { setStatus('Check the dates: "From" must be before "To".', true); return; }
+
+  const b = map.getBounds();
+  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+  const size = map.getSize();
+  const scale = Math.min(1, 1024 / Math.max(size.x, size.y));
+  const width = Math.max(64, Math.round(size.x * scale * (window.devicePixelRatio > 1 ? 1.5 : 1)));
+  const height = Math.max(64, Math.round(size.y * scale * (window.devicePixelRatio > 1 ? 1.5 : 1)));
+
+  const dataFilter = Object.assign({
+    timeRange: { from: from + 'T00:00:00Z', to: to + 'T23:59:59Z' },
+    mosaickingOrder: m.clouds ? 'leastCC' : 'mostRecent'
+  }, m.extraFilter || {});
+  if (m.clouds) dataFilter.maxCloudCoverage = Number($('cloud').value);
+
+  const request = {
+    input: {
+      bounds: { bbox, properties: { crs: 'http://www.opengis.net/def/crs/EPSG/0/4326' } },
+      data: [{ type: m.type, dataFilter }]
+    },
+    output: {
+      width: Math.min(width, 2500), height: Math.min(height, 2500),
+      responses: [{ identifier: 'default', format: { type: 'image/png' } }]
+    },
+    evalscript: m.script
+  };
+
+  const id = 'r' + (++seq);
+  $('go').disabled = true;
+  setStatus('Asking the satellite archive… this can take 5–30 seconds.');
+  pending[id] = (ok, data) => {
+    $('go').disabled = false;
+    if (!ok) { setStatus(data, true); return; }
+    if (overlay) map.removeLayer(overlay);
+    overlay = L.imageOverlay('data:image/png;base64,' + data,
+      [[bbox[1], bbox[0]], [bbox[3], bbox[2]]],
+      { opacity: $('opacity').value / 100 }).addTo(map);
+    setStatus('Done: ' + from + ' to ' + to + '. Empty or patchy? Widen the dates or allow more cloud.');
+  };
+  Android.process(JSON.stringify(request), id);
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple app icon: a planet with an orbiting satellite -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path android:fillColor="#0E2A47" android:pathData="M0,0h48v48h-48z" />
+    <path android:fillColor="#2E8B57" android:pathData="M24,14a12,12 0,1 1,0 24a12,12 0,1 1,0 -24z" />
+    <path android:fillColor="#3FA7D6" android:pathData="M15,24c3,-4 7,-3 9,0s5,5 9,2c-1,6 -5,11 -9,11c-6,0 -10,-6 -9,-13z" />
+    <path android:strokeColor="#F2C14E" android:strokeWidth="1.5" android:fillColor="#00000000"
+        android:pathData="M6,30c10,-14 26,-20 36,-18" />
+    <path android:fillColor="#F2C14E" android:pathData="M37,9h4v4h-4z" />
+</vector>
